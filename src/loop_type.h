@@ -8,7 +8,8 @@
 typedef enum loop_type {
     looptype_none,
     looptype_repeat,
-    looptype_pingpong
+    looptype_pingpong,
+    looptype_granular
 } loop_type;
 
 typedef enum play_start {

@@ -242,6 +242,12 @@ void loop() {
     * mechanism to prevent attempted simultaneous filesystem accesses from playback and user code
   * examples added: PlayPiano and FileAccess
   * start playback at arbitrary point in file (`play_start::play_start_arbitrary`)
+* 2026-03-18:
+  * new `looptype_granular` loop mode enables treating the dual playback heads as independent grains while the legacy loop types retain their original behaviour
+  * each granular head can run at its own playback rate via `setPlaybackRateForReadHead()` / `playbackRateForReadHead()`
+  * the secondary head keeps its configured rate during crossfades and, once the fade completes, head 1 inherits head 2's rate automatically
+  * set your player to granular mode with `setLoopType(loop_type::looptype_granular)` and queue upcoming grains atomically using `setNextGrain(loopStart, loopFinish, head2Rate)`; the helper defers loop end updates until the current crossfade completes
+  * call `setPlaybackRate()` to reset both heads to the same rate
   
 * 26/02/2022: v1.0.16:
   * add option for starting sample at beginning or at loop start

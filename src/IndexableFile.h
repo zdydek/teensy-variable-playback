@@ -128,6 +128,7 @@ public:
 						break;
 						
 					case loop_type::looptype_repeat:
+					case loop_type::looptype_granular:
 						if (nextIdx > _loop_finish_blocks) 	// trying to go too far...
 						{
 							/*
@@ -167,6 +168,7 @@ public:
 						break;
 						
 					case loop_type::looptype_repeat:
+					case loop_type::looptype_granular:
 						if (nextIdx < _loop_start_blocks) 	// trying to go too far...
 						{
 							int nextLast = _buffers[MAX_NUM_BUFFERS - 1]->index;

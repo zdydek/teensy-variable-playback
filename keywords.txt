@@ -8,6 +8,9 @@ playRaw	KEYWORD2
 playWav	KEYWORD2
 isPlaying	KEYWORD2
 setPlaybackRate	KEYWORD2
+setPlaybackRateForReadHead	KEYWORD2
+playbackRateForReadHead	KEYWORD2
+setNextGrain	KEYWORD2
 setLoopType	KEYWORD2
 getLoopType	KEYWORD2
 setLoopStart	KEYWORD2
@@ -29,6 +32,7 @@ loop_type	KEYWORD2
 looptype_none	LITERAL1
 looptype_repeat	LITERAL1
 looptype_pingpong	LITERAL1
+looptype_granular	LITERAL1
 
 play_start	KEYWORD2
 play_start_sample	LITERAL1

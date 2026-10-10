@@ -6,13 +6,24 @@
 #include <thread>
 #include <iostream>
 #include <fstream>
-#include <filesystem>
+#if __has_include(<filesystem>)
+    #include <filesystem>
+    #define TVP_USE_STD_FILESYSTEM 1
+#elif __has_include(<experimental/filesystem>)
+    #include <experimental/filesystem>
+#else
+    #error "std::filesystem or std::experimental::filesystem is required"
+#endif
 #include <unistd.h>
 
 #ifdef __APPLE__ 
 #define __filesystem std::__fs::filesystem
 #else
-#define __filesystem std::filesystem
+    #ifdef TVP_USE_STD_FILESYSTEM
+        #define __filesystem std::filesystem
+    #else
+        #define __filesystem std::experimental::filesystem
+    #endif
 #endif
 class TestAudioOutput : public AudioStream
 {

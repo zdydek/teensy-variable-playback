@@ -253,10 +253,11 @@ public:
 						_crossfadeState = 0;
 						switch (_loopType) 
 						{
-							case looptype_repeat:
-							{
-								if (_playbackRate >= 0.0) 
-									_bufferPosition1 = _samples_to_start(_loop_start);
+						case looptype_repeat:
+						case looptype_granular:
+						{
+							if (_playbackRate >= 0.0) 
+								_bufferPosition1 = _samples_to_start(_loop_start);
 								else
 									_bufferPosition1 = _samples_to_start(_loop_finish - _numChannels);
 								break;
@@ -290,7 +291,7 @@ public:
 				}
 			}		
 			
-			// All channels done: step buffer positions on
+            // All channels done: step buffer positions on
             _remainder += _playbackRate;
 
             auto delta = static_cast<signed int>(_remainder);
@@ -298,10 +299,20 @@ public:
             _bufferPosition1 += (delta * _numChannels);
 			if (0 != _crossfadeState)  // doing a cross-fade
 			{
-				if (_loopType == loop_type::looptype_pingpong) // bufferPosition2 is going opposite to bufferPosition1
-					_bufferPosition2 -= (delta * _numChannels);
+				if (_isGranularLoop())
+				{
+					_secondaryRemainder += _secondaryEffectivePlaybackRate;
+					auto secondaryDelta = static_cast<signed int>(_secondaryRemainder);
+					_secondaryRemainder -= static_cast<double>(secondaryDelta);
+					_bufferPosition2 += (secondaryDelta * _numChannels);
+				}
 				else
-					_bufferPosition2 += (delta * _numChannels);
+				{
+					if (_loopType == loop_type::looptype_pingpong)
+						_bufferPosition2 -= (delta * _numChannels);
+					else
+						_bufferPosition2 += (delta * _numChannels);
+				}
 			}
         }
         return count;
@@ -310,56 +321,92 @@ public:
 private:	
 	void _updateCrossfade(void)
 	{           
+		if (!_isGranularLoop())
+		{
+			if (_playbackRate >= 0.0) {
+				if (_crossfadeState == 0 && _bufferPosition1 >= int32_t(_samples_to_start(_loop_finish - _crossfadeDurationInSamples))) {
+					_bufferPosition2 = _loopType == loop_type::looptype_pingpong
+											?_loop_finish
+											:_loop_start;
+					_bufferPosition2 = _samples_to_start(_bufferPosition2);
+					_crossfadeState = 1;
+				}
+			} else {
+				if (_crossfadeState == 0 && _bufferPosition1 <= int32_t(_samples_to_start(_loop_start + _crossfadeDurationInSamples))) {
+					_bufferPosition2 = _loopType == loop_type::looptype_pingpong
+											?_loop_start
+											:_loop_finish;
+					_bufferPosition2 = _samples_to_start(_bufferPosition2);
+					_crossfadeState = 1;
+				}
+			}
+			if (_crossfadeState == 1) 
+			{
+				if ((_loopType == loop_type::looptype_pingpong) != (_playbackRate > 0.0))
+				{
+					if (_bufferPosition2 > int32_t(_samples_to_start(_loop_start + _crossfadeDurationInSamples)))
+					{
+						_bufferPosition1 = _bufferPosition2;
+						_crossfadeState = 0;
+					}
+					else
+						_crossfade = 1.0 - ((_bufferPosition2 - _samples_to_start(_loop_start) ) / _numChannels / static_cast<double>(_crossfadeDurationInSamples));
+				}
+				else
+				{
+					if (_bufferPosition2 < int32_t(_samples_to_start(_loop_finish - _crossfadeDurationInSamples)))
+					{
+						_bufferPosition1 = _bufferPosition2;
+						_crossfadeState = 0;
+					}
+					else
+						_crossfade = 1.0 - ((_samples_to_start(_loop_finish) - _bufferPosition2) / _numChannels / static_cast<double>(_crossfadeDurationInSamples));
+				}
+				if (0 == _crossfadeState && _loopType == loop_type::looptype_pingpong)
+					_playbackRate = -_playbackRate;
+			}
+			return;
+		}
+
 		if (_playbackRate >= 0.0) {
-    // read the sample value for given channel and store it at the location pointed to by the pointer 'value'
 			if (_crossfadeState == 0 && _bufferPosition1 >= int32_t(_samples_to_start(_loop_finish - _crossfadeDurationInSamples))) {
 				_bufferPosition2 = _loopType == loop_type::looptype_pingpong
 											?_loop_finish
 											:_loop_start;
 				_bufferPosition2 = _samples_to_start(_bufferPosition2);
 				_crossfadeState = 1;
+				_prepareSecondaryHeadForCrossfade();
 			}
-			
-			//*/
 		} else {
-			// See if playback has reached start of crossfade zone
 			if (_crossfadeState == 0 && _bufferPosition1 <= int32_t(_samples_to_start(_loop_start + _crossfadeDurationInSamples))) {
 				_bufferPosition2 = _loopType == loop_type::looptype_pingpong
 											?_loop_start
 											:_loop_finish;
 				_bufferPosition2 = _samples_to_start(_bufferPosition2);
 				_crossfadeState = 1;
+				_prepareSecondaryHeadForCrossfade();
 			}
 		}
-		
-		// Compute or terminate crossfade
 		if (_crossfadeState == 1) 
 		{
-			if ((_loopType == loop_type::looptype_pingpong) != (_playbackRate > 0.0)) // bufferPosition2 is going forwards from start
+			if (_secondaryEffectivePlaybackRate >= 0.0)
 			{
 				if (_bufferPosition2 > int32_t(_samples_to_start(_loop_start + _crossfadeDurationInSamples)))
 				{
-					_bufferPosition1 = _bufferPosition2;
-					_crossfadeState = 0; // stop crossfade
+					_completeCrossfade();
 				}
-				else // amount of audio from _bufferPosition1 to use						
+				else
 					_crossfade = 1.0 - ((_bufferPosition2 - _samples_to_start(_loop_start) ) / _numChannels / static_cast<double>(_crossfadeDurationInSamples));
 			}
-			else // bufferPosition2 is going backwards from finish
+			else
 			{
 				if (_bufferPosition2 < int32_t(_samples_to_start(_loop_finish - _crossfadeDurationInSamples)))
 				{
-					_bufferPosition1 = _bufferPosition2;
-					_crossfadeState = 0; // stop crossfade
+					_completeCrossfade();
 				}
-				else // amount of audio from _bufferPosition1 to use						
+				else
 					_crossfade = 1.0 - ((_samples_to_start(_loop_finish) - _bufferPosition2) / _numChannels / static_cast<double>(_crossfadeDurationInSamples));
 			}
-			
-			// We never cause the caller to reverse playback when using 
-			// crossfade, so we have to do it ourselves here
-			if (0 == _crossfadeState && _loopType == loop_type::looptype_pingpong)
-				_playbackRate = -_playbackRate;
 		}
 	}
 
@@ -393,12 +440,12 @@ private:
         int16_t result = 0, resx = -1;
         if (!_useDualPlaybackHead || _crossfadeState == 0) {
 			resx = _bufferPosition1+channel;
-            result =  _getSourceBufferValue(_bufferPosition1, 0, channel);
+            result = _getCompensatedSourceBufferValue(1, _bufferPosition1, 0, channel);
         } else if (_crossfade == 0.0) {
-            result =  _getSourceBufferValue(_bufferPosition2, 0, channel);
+            result = _getCompensatedSourceBufferValue(2, _bufferPosition2, 0, channel);
         } else{
-            int result1 =  _getSourceBufferValue(_bufferPosition1, 0, channel);
-            int result2 =  _getSourceBufferValue(_bufferPosition2, 0, channel);
+            int result1 = _getCompensatedSourceBufferValue(1, _bufferPosition1, 0, channel);
+            int result2 = _getCompensatedSourceBufferValue(2, _bufferPosition2, 0, channel);
             result = ((1.0 - _crossfade ) * result2) + ((_crossfade) * result1);
         }
 
@@ -412,7 +459,7 @@ private:
                         if (!_useDualPlaybackHead) {
                             if ( _numInterpolationPoints[channel] < 2 &&_playbackRate > 1.0 && _bufferPosition1 - _numChannels > _header_offset * 2 ) {
                                 // need to update last sample
-                                _interpolationPoints[channel][1].y = _getSourceBufferValue(_bufferPosition1, -1, channel);
+                                _interpolationPoints[channel][1].y = _getCompensatedSourceBufferValue(1, _bufferPosition1, -1, channel);
                             }
                         }
 						_addInterpolationPoint(channel,-resx,result);
@@ -424,7 +471,7 @@ private:
                         if (!_useDualPlaybackHead) {
                             if (_numInterpolationPoints[channel] < 2  && _playbackRate < -1.0) {
                                 // need to update last sample
-                                _interpolationPoints[channel][1].y = _getSourceBufferValue(_bufferPosition1, 1, channel);
+                                _interpolationPoints[channel][1].y = _getCompensatedSourceBufferValue(1, _bufferPosition1, 1, channel);
                             }
                         }
 						_addInterpolationPoint(channel,-resx,result);
@@ -449,11 +496,11 @@ private:
                         if (numberOfSamplesToUpdate > 4) 
                             numberOfSamplesToUpdate = 4; // if playbackrate > 4, only need to pop last 4 samples
                         for (int i=numberOfSamplesToUpdate; i > 0; i--) {
-							int16_t y = _getSourceBufferValue(_bufferPosition1, 1-i, channel);
+							int16_t y = _getCompensatedSourceBufferValue(1, _bufferPosition1, 1-i, channel);
 							
 							if (_useDualPlaybackHead && 0 != _crossfadeState)
 								y = y * _crossfade
-									+ _getSourceBufferValue(_bufferPosition2, _loopType == loop_type::looptype_pingpong?(i-1):(1-i), channel) * (1.0 - _crossfade);
+									+ _getCompensatedSourceBufferValue(2, _bufferPosition2, _loopType == loop_type::looptype_pingpong?(i-1):(1-i), channel) * (1.0 - _crossfade);
 									
 							_addInterpolationPoint(channel,_bufferPosition1 + (1-i)*_numChannels+channel,y);
 							
@@ -467,11 +514,11 @@ private:
                         if (numberOfSamplesToUpdate > 4) 
                             numberOfSamplesToUpdate = 4; // if playbackrate > 4, only need to pop last 4 samples
                         for (int i=numberOfSamplesToUpdate; i > 0; i--) {
-							int16_t y = _getSourceBufferValue(_bufferPosition1, i-1, channel);
+							int16_t y = _getCompensatedSourceBufferValue(1, _bufferPosition1, i-1, channel);
 							
 							if (_useDualPlaybackHead && 0 != _crossfadeState)
 								y = y * _crossfade
-									+ _getSourceBufferValue(_bufferPosition2, _loopType == loop_type::looptype_pingpong?(1-i):(i-1), channel) * (1.0 - _crossfade);
+									+ _getCompensatedSourceBufferValue(2, _bufferPosition2, _loopType == loop_type::looptype_pingpong?(1-i):(i-1), channel) * (1.0 - _crossfade);
 									
 							_addInterpolationPoint(channel,_bufferPosition1 + (i-1)*_numChannels+channel,y);
                             }
@@ -514,42 +561,57 @@ private:
     }
 
 public:	
-    void setPlaybackRate(double f) {
-        _playbackRate = f;
-        if (!_useDualPlaybackHead) {
-            if (f < 0.0) {
-                if  (_bufferPosition1 <= _header_offset) {
-                    if (_play_start == play_start::play_start_sample)
-                        _bufferPosition1 = _samples_to_start(_file_samples - 1);
-                    else
-                        _bufferPosition1 = _samples_to_start(_loop_finish - 1);
-                } 
-            } else {
-                if (f >= 0.0 && _bufferPosition1 < _header_offset) {
-                    if (_play_start == play_start::play_start_sample) 
-                        _bufferPosition1 = _samples_to_start(0);
-                    else
-                        _bufferPosition1 = _samples_to_start(_loop_start);
-                }
-            }
-        } else { 
-            // _useDualPlaybackHead == true 
-            if (_crossfade == 0.0) {
-                if (f < 0.0) { 
-                    if( _bufferPosition1 <= _header_offset) {
-                        if (_play_start == play_start::play_start_sample)
-                            _bufferPosition1 = _samples_to_start(_file_samples - 1);
-                        else
-                            _bufferPosition1 = _samples_to_start(_loop_finish - 1);
-                    }
-                } else {
-                    if (f >= 0.0 && _bufferPosition1 < _header_offset) {
-                        _bufferPosition1 = _header_offset;
-                    }
-                }
-            }
-        }
-    }
+	void setPlaybackRate(double f) {
+		_setPrimaryPlaybackRate(f, false);
+	}
+
+	void setPlaybackRateForReadHead(uint8_t readHead, double f)
+	{
+		if (readHead <= 1)
+		{
+			_setPrimaryPlaybackRate(f, true);
+			return;
+		}
+		if (readHead == 2)
+		{
+			if (!_isGranularLoop())
+				return;
+			_secondaryPlaybackRate = f;
+			_secondaryRateExplicit = true;
+			if (0 != _crossfadeState)
+				_secondaryEffectivePlaybackRate = f;
+		}
+	}
+
+	double playbackRateForReadHead(uint8_t readHead) const
+	{
+		if (readHead <= 1)
+			return _playbackRate;
+		if (!_isGranularLoop())
+			return _playbackRate;
+		if (_secondaryRateExplicit)
+			return _secondaryPlaybackRate;
+		return _defaultSecondaryPlaybackRate();
+	}
+
+	void setGrainCompensationForReadHead(uint8_t readHead, uint32_t grain_start, uint32_t grain_finish, double startGain, double endGain)
+	{
+		if (readHead <= 1)
+		{
+			_head1GrainStart = grain_start;
+			_head1GrainFinish = grain_finish;
+			_head1StartGain = startGain;
+			_head1EndGain = endGain;
+			return;
+		}
+		if (readHead == 2 && _isGranularLoop())
+		{
+			_head2GrainStart = grain_start;
+			_head2GrainFinish = grain_finish;
+			_head2StartGain = startGain;
+			_head2EndGain = endGain;
+		}
+	}
 
     float playbackRate() {
         return _playbackRate;
@@ -567,6 +629,19 @@ public:
 		if (nullptr != _sourceBuffer)
 			_sourceBuffer->setLoopType(loopType);
         _loopType = loopType;
+		_secondaryRateExplicit = false;
+		_secondaryPlaybackRate = _playbackRate;
+		_secondaryEffectivePlaybackRate = _playbackRate;
+		_secondaryRemainder = _remainder;
+		_nextLoopFinish = -1;
+		_head1GrainStart = _loop_start;
+		_head1GrainFinish = _loop_finish;
+		_head2GrainStart = _loop_start;
+		_head2GrainFinish = _loop_finish;
+		_head1StartGain = 1.0;
+		_head1EndGain = 1.0;
+		_head2StartGain = 1.0;
+		_head2EndGain = 1.0;
     }
 
     loop_type getLoopType() {
@@ -617,13 +692,19 @@ public:
 					break;
 			}
         }
-        _crossfade = 0.0;
+		_crossfade = 0.0;
 		_crossfadeState = 0;
+		_secondaryRemainder = 0.0;
+		_nextLoopFinish = -1;
+		_head2GrainStart = _head1GrainStart;
+		_head2GrainFinish = _head1GrainFinish;
+		_head2StartGain = _head1StartGain;
+		_head2EndGain = _head1EndGain;
     }
 	
 	// This only works once we know how many channels we have, 
 	// i.e. NOT before playback has been triggered and we have a file
-	uint32_t _samples_to_start(uint32_t samples)
+	uint32_t _samples_to_start(uint32_t samples) const
 	{
 		return _header_offset + (samples * _numChannels);
 	}
@@ -640,6 +721,29 @@ public:
 		if (nullptr != _sourceBuffer)
 			_sourceBuffer->setLoopFinish(_samples_to_start(_loop_finish));
     }
+
+	bool setNextGrain(uint32_t loop_start, uint32_t loop_finish, double head2PlaybackRate)
+	{
+		if (!_isGranularLoop())
+			return false;
+		// Reject new requests both while a crossfade is active and while a
+		// previously accepted next grain is still pending completion.
+		if (_crossfadeState != 0 || _nextLoopFinish >= 0)
+			return false;
+		_applyPendingLoopFinish();
+		setLoopStart(loop_start);
+		_nextLoopFinish = loop_finish;
+		setPlaybackRateForReadHead(2, head2PlaybackRate);
+		return true;
+	}
+
+	bool setNextGrain(uint32_t loop_start, uint32_t loop_finish, double head2PlaybackRate, uint32_t grain_finish, double head2StartGain, double head2EndGain)
+	{
+		if (!setNextGrain(loop_start, loop_finish, head2PlaybackRate))
+			return false;
+		setGrainCompensationForReadHead(2, loop_start, grain_finish, head2StartGain, head2EndGain);
+		return true;
+	}
 
     void setUseDualPlaybackHead(bool useDualPlaybackHead) {
         _useDualPlaybackHead = useDualPlaybackHead;
@@ -732,6 +836,19 @@ protected:
 
     double _playbackRate = 1.0;
     double _remainder = 0.0;
+    double _secondaryPlaybackRate = 1.0;
+    double _secondaryEffectivePlaybackRate = 1.0;
+    double _secondaryRemainder = 0.0;
+    bool _secondaryRateExplicit = false;
+    int32_t _nextLoopFinish = -1;
+    uint32_t _head1GrainStart = 0;
+    uint32_t _head1GrainFinish = 0;
+    uint32_t _head2GrainStart = 0;
+    uint32_t _head2GrainFinish = 0;
+    double _head1StartGain = 1.0;
+    double _head1EndGain = 1.0;
+    double _head2StartGain = 1.0;
+    double _head2EndGain = 1.0;
     loop_type _loopType = loop_type::looptype_none;
     play_start _play_start = play_start::play_start_sample;
     int _bufferPosition1 = 0;
@@ -759,6 +876,19 @@ protected:
 	int16_t _getSourceBufferValue(int pos, int offset, uint16_t channel) 
 		{ return getSourceBufferValue(pos + offset*_numChannels + channel); }
 
+	int16_t _getCompensatedSourceBufferValue(uint8_t readHead, int pos, int offset, uint16_t channel)
+	{
+		const int16_t dry = _getSourceBufferValue(pos, offset, channel);
+		const int32_t samplePos = pos + offset * _numChannels;
+		const double wet = static_cast<double>(dry) * _gainForReadHeadSample(readHead, samplePos);
+
+		if (wet > 32767.0)
+			return 32767;
+		if (wet < -32768.0)
+			return -32768;
+		return static_cast<int16_t>(wet);
+	}
+
 	void _addInterpolationPoint(uint16_t channel, uint32_t x, int16_t y)
 	{
 		switch (_interpolationType)
@@ -782,6 +912,131 @@ protected:
 				if (_numInterpolationPoints[channel] < 4) _numInterpolationPoints[channel]++;
 				break;
 		}
+	}
+
+	bool _isGranularLoop() const
+	{
+		return _loopType == loop_type::looptype_granular;
+	}
+
+	void _prepareSecondaryHeadForCrossfade()
+	{
+		if (!_useDualPlaybackHead || !_isGranularLoop())
+			return;
+
+		if (_secondaryRateExplicit)
+		{
+			_secondaryEffectivePlaybackRate = _secondaryPlaybackRate;
+			_secondaryRemainder = 0.0;
+		}
+		else
+		{
+			_secondaryEffectivePlaybackRate = _defaultSecondaryPlaybackRate();
+			_secondaryRemainder = _remainder;
+		}
+	}
+
+	void _completeCrossfade()
+	{
+		_bufferPosition1 = _bufferPosition2;
+		_crossfadeState = 0;
+		_crossfade = 0.0;
+		if (_isGranularLoop())
+		{
+			_playbackRate = _secondaryEffectivePlaybackRate;
+			_remainder = _secondaryRemainder;
+			_secondaryRemainder = 0.0;
+			_head1GrainStart = _head2GrainStart;
+			_head1GrainFinish = _head2GrainFinish;
+			_head1StartGain = _head2StartGain;
+			_head1EndGain = _head2EndGain;
+		}
+		_applyPendingLoopFinish();
+	}
+
+	double _defaultSecondaryPlaybackRate() const
+	{
+		if (_loopType == loop_type::looptype_pingpong)
+			return -_playbackRate;
+		return _playbackRate;
+	}
+
+	void _setPrimaryPlaybackRate(double f, bool preserveSecondaryOverride)
+	{
+		if (_isGranularLoop() && !preserveSecondaryOverride)
+		{
+			_secondaryRateExplicit = false;
+			_secondaryPlaybackRate = f;
+		}
+
+		_playbackRate = f;
+		if (!_useDualPlaybackHead) {
+			if (f < 0.0) {
+				if  (_bufferPosition1 <= _header_offset) {
+					if (_play_start == play_start::play_start_sample)
+						_bufferPosition1 = _samples_to_start(_file_samples - 1);
+					else
+						_bufferPosition1 = _samples_to_start(_loop_finish - 1);
+				}
+			} else {
+				if (f >= 0.0 && _bufferPosition1 < _header_offset) {
+					if (_play_start == play_start::play_start_sample) 
+						_bufferPosition1 = _samples_to_start(0);
+					else
+						_bufferPosition1 = _samples_to_start(_loop_start);
+				}
+			}
+		} else { 
+			// _useDualPlaybackHead == true 
+			if (_crossfade == 0.0) {
+				if (f < 0.0) { 
+					if( _bufferPosition1 <= _header_offset) {
+						if (_play_start == play_start::play_start_sample)
+							_bufferPosition1 = _samples_to_start(_file_samples - 1);
+						else
+							_bufferPosition1 = _samples_to_start(_loop_finish - 1);
+					}
+				} else {
+					if (f >= 0.0 && _bufferPosition1 < _header_offset) {
+						_bufferPosition1 = _header_offset;
+					}
+				}
+			}
+		}
+		if (_isGranularLoop() && 0 != _crossfadeState && !_secondaryRateExplicit)
+		{
+			_secondaryEffectivePlaybackRate = _defaultSecondaryPlaybackRate();
+			_secondaryRemainder = _remainder;
+		}
+	}
+
+	void _applyPendingLoopFinish()
+	{
+		if (_nextLoopFinish >= 0)
+		{
+			setLoopFinish(_nextLoopFinish);
+			_nextLoopFinish = -1;
+		}
+	}
+
+	double _gainForReadHeadSample(uint8_t readHead, int32_t bufferPosition) const
+	{
+		const uint32_t grainStart = (readHead <= 1) ? _head1GrainStart : _head2GrainStart;
+		const uint32_t grainFinish = (readHead <= 1) ? _head1GrainFinish : _head2GrainFinish;
+		const double startGain = (readHead <= 1) ? _head1StartGain : _head2StartGain;
+		const double endGain = (readHead <= 1) ? _head1EndGain : _head2EndGain;
+
+		if (grainFinish <= grainStart)
+			return startGain;
+		if (bufferPosition <= int32_t(_samples_to_start(grainStart)))
+			return startGain;
+		if (bufferPosition >= int32_t(_samples_to_start(grainFinish)))
+			return endGain;
+
+		const double startPos = static_cast<double>(_samples_to_start(grainStart));
+		const double finishPos = static_cast<double>(_samples_to_start(grainFinish));
+		const double u = (static_cast<double>(bufferPosition) - startPos) / (finishPos - startPos);
+		return startGain + (endGain - startGain) * u;
 	}
 
 };

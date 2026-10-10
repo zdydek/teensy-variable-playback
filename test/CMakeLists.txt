@@ -59,6 +59,7 @@ if (DEFINED BUILD_FOR_LINUX)
             low_level/wav_header/test_parse_wave_header.cpp
             
             low_level/array/test_array_mono_loop_forward_playback.cpp
+            low_level/array/test_array_dualhead_crossfade.cpp
             low_level/array/test_array_stereo_loop_forward_playback.cpp
             
             low_level/arraywav/test_array_mono_loop_forward_playback.cpp
@@ -81,4 +82,8 @@ if (DEFINED BUILD_FOR_LINUX)
     target_link_libraries(tests teensy_audio_x86_stubs)
     target_link_libraries(tests teensy_x86_sd_stubs)
     target_link_libraries(tests teensy_variable_playback)
+
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+        target_link_libraries(tests stdc++fs)
+    endif()
 endif()

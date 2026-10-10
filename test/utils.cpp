@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <iostream>
 #include <boost/test/unit_test.hpp>
 #include "utils.h"
 
@@ -29,5 +30,4 @@ void printTest(uint32_t expectedDataSize,double rate)
               << ")"
               << std::endl;
 }
-
 

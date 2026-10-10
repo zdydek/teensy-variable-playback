@@ -105,6 +105,32 @@ class AudioPlayResmp : public AudioStream, public newdigate::AudioEventResponder
             reader->setPlaybackRate(f);
         }
 
+	void setPlaybackRateForReadHead(uint8_t readHead, float f) {
+		reader->setPlaybackRateForReadHead(readHead, f);
+	}
+
+	float playbackRateForReadHead(uint8_t readHead) {
+		return reader->playbackRateForReadHead(readHead);
+	}
+
+	void setGrainCompensationForReadHead(uint8_t readHead, uint32_t grain_start, uint32_t grain_finish, float startGain, float endGain) {
+		reader->setGrainCompensationForReadHead(readHead, grain_start, grain_finish, startGain, endGain);
+	}
+
+	bool setNextGrain(uint32_t loop_start, uint32_t loop_finish, float head2PlaybackRate) {
+		return reader->setNextGrain(loop_start, loop_finish, head2PlaybackRate);
+	}
+
+	bool setNextGrain(
+		uint32_t loop_start,
+		uint32_t loop_finish,
+		float head2PlaybackRate,
+		uint32_t grain_finish,
+		float head2StartGain,
+		float head2EndGain) {
+		return reader->setNextGrain(loop_start, loop_finish, head2PlaybackRate, grain_finish, head2StartGain, head2EndGain);
+	}
+
         void setLoopType(loop_type t) {
             reader->setLoopType(t);
         }
